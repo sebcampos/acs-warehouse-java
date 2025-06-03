@@ -91,4 +91,16 @@ class Client(val serviceAccount: HashMap<String, String> =  hashMapOf()) {
 
     }
 
+    fun getSpreadSheets() {
+
+    }
+
+    fun readSpreadSheet(gSheetId: String, sheetName: String) {}
+
+    fun appendToSheet(gSheetId: String, sheetRange: String, rows: List<String>) {
+
+    }
+
+    fun clearFromSheet(gSheetId: String, sheetRange: String) {}
+
 }
