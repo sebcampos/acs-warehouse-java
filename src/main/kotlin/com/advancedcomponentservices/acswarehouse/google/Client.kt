@@ -6,6 +6,7 @@ import com.nimbusds.jose.JWSHeader
 import com.nimbusds.jose.crypto.RSASSASigner
 import com.nimbusds.jwt.JWTClaimsSet
 import com.nimbusds.jwt.SignedJWT
+import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -57,14 +58,15 @@ class Client(val serviceAccount: HashMap<String, String> =  hashMapOf()) {
 
     fun requestToken() {
         fun makePost(url: String, body: String): String {
-            val request = Request.Builder()
-                .url(url)
-                .post(body.toRequestBody("application/x-www-form-urlencoded".toMediaType()))
+            val formBody = FormBody.Builder()
+                .add("username", "john_doe")
+                .add("password", "secret123")
                 .build()
 
-            client.newCall(request).execute().use {
-                return it.body?.string() ?: ""
-            }
+            val request = Request.Builder()
+                .url("https://example.com/login")
+                .post(formBody)
+                .build()
         }
     }
 
