@@ -20,11 +20,12 @@ import java.time.Instant
 import java.util.Date
 
 class Client(val serviceAccount: HashMap<String, String> =  hashMapOf()) {
+    var accessToken: String? = null
     val client: OkHttpClient = OkHttpClient.Builder()
 //        .addInterceptor(/* custom logic */)
         .build()
     init {
-
+        requestToken()
     }
 
     fun buildJwt(serviceAccountEmail: String, privateKeyPem: String, scopes: List<String>): String {
@@ -40,7 +41,7 @@ class Client(val serviceAccount: HashMap<String, String> =  hashMapOf()) {
 
         val claimsSet = JWTClaimsSet.Builder()
             .issuer(serviceAccountEmail)
-            .audience("https://oauth2.googleapis.com/token")
+            .audience(Endpoints.token)
             .issueTime(Date.from(now))
             .expirationTime(Date.from(hourLater))
             .claim("scope", scopes.joinToString(" "))
@@ -57,17 +58,37 @@ class Client(val serviceAccount: HashMap<String, String> =  hashMapOf()) {
     }
 
     fun requestToken() {
-        fun makePost(url: String, body: String): String {
-            val formBody = FormBody.Builder()
-                .add("username", "john_doe")
-                .add("password", "secret123")
-                .build()
+        val jwt = buildJwt(
+            serviceAccount["client_email"]!!,
+            serviceAccount["private_key"]!!,
+            listOf(
+                "https://www.googleapis.com/auth/drive",
+                "https://www.googleapis.com/auth/drive.readonly",
+                "https://www.googleapis.com/auth/drive.file",
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/spreadsheets.readonly"
+            )
+        )
+        val formBody = FormBody.Builder()
+            .add("grant_type", "urn:ieft:params:oauth:grant-type:jwt-bearer")
+            .add("assertion", jwt)
+            .build()
 
-            val request = Request.Builder()
-                .url("https://example.com/login")
-                .post(formBody)
-                .build()
+        val request = Request.Builder()
+            .url(Endpoints.token)
+            .post(formBody)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw Exception("Unexpected code $response")
+            }
+
+            val body = response.body?.string()
+            accessToken = body // this will contain access_token, expires_in, etc.
         }
+
     }
 
 }
