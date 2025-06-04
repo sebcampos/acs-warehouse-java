@@ -1,12 +1,9 @@
 package com.advancedcomponentservices.acswarehouse.google
 
-import com.nimbusds.jose.JOSEObjectType
-import com.nimbusds.jose.JWSAlgorithm
-import com.nimbusds.jose.JWSHeader
-import com.nimbusds.jose.crypto.RSASSASigner
-import com.nimbusds.jwt.JWTClaimsSet
-import com.nimbusds.jwt.SignedJWT
-import okhttp3.FormBody
+import com.advancedcomponentservices.acswarehouse.google.models.GSheet
+import com.advancedcomponentservices.acswarehouse.google.models.GSpreadSheet
+import com.advancedcomponentservices.acswarehouse.google.models.ReadSheetResponse
+import com.google.gson.Gson
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -14,22 +11,41 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.bouncycastle.util.io.pem.PemReader
 import java.io.StringReader
 import java.security.KeyFactory
+import java.security.Signature
 import java.security.interfaces.RSAPrivateKey
 import java.security.spec.PKCS8EncodedKeySpec
 import java.time.Instant
-import java.util.Date
+import java.util.Base64
+
+
+
+
 
 class Client(val serviceAccount: HashMap<String, String> =  hashMapOf()) {
-    var accessToken: String? = null
+    private var accessToken: String? = null
+    private var expiresIn: Double? = null
+    private var gSheets: List<GSpreadSheet>? = null
+    val applicationFormType = "application/x-www-form-urlencoded".toMediaType()
     val client: OkHttpClient = OkHttpClient.Builder()
 //        .addInterceptor(/* custom logic */)
         .build()
+
     init {
         requestToken()
+        setSpreadSheets()
+    }
+
+    fun getAccessToken(): String {
+        val bufferSeconds: Double = 300.0
+        val expired = Instant.now().epochSecond >= (expiresIn!! - bufferSeconds)
+        if (accessToken == null || expired) {
+            requestToken()
+        }
+        return accessToken!!
     }
 
     fun buildJwt(serviceAccountEmail: String, privateKeyPem: String, scopes: List<String>): String {
-        // Parse PEM private key to RSAPrivateKey
+        // Parse RSA private key
         val pemReader = PemReader(StringReader(privateKeyPem))
         val pemObject = pemReader.readPemObject()
         val keySpec = PKCS8EncodedKeySpec(pemObject.content)
@@ -39,22 +55,33 @@ class Client(val serviceAccount: HashMap<String, String> =  hashMapOf()) {
         val now = Instant.now()
         val hourLater = now.plusSeconds(3600)
 
-        val claimsSet = JWTClaimsSet.Builder()
-            .issuer(serviceAccountEmail)
-            .audience(Endpoints.token)
-            .issueTime(Date.from(now))
-            .expirationTime(Date.from(hourLater))
-            .claim("scope", scopes.joinToString(" "))
-            .build()
+        val gson = Gson()
+        val encoder = Base64.getUrlEncoder().withoutPadding()
 
-        val signer = RSASSASigner(privateKey)
-        val signedJWT = SignedJWT(
-            JWSHeader.Builder(JWSAlgorithm.RS256).type(JOSEObjectType.JWT).build(),
-            claimsSet
+        val header = mapOf("alg" to "RS256", "typ" to "JWT")
+        val payload = mapOf(
+            "iss" to serviceAccountEmail,
+            "scope" to scopes.joinToString(" "),
+            "aud" to "https://oauth2.googleapis.com/token",
+            "iat" to now.epochSecond,
+            "exp" to hourLater.epochSecond
         )
-        signedJWT.sign(signer)
 
-        return signedJWT.serialize()
+        val headerJson = gson.toJson(header)
+        val payloadJson = gson.toJson(payload)
+
+        val encodedHeader = encoder.encodeToString(headerJson.toByteArray(Charsets.UTF_8))
+        val encodedPayload = encoder.encodeToString(payloadJson.toByteArray(Charsets.UTF_8))
+        val unsignedToken = "$encodedHeader.$encodedPayload"
+
+        // Sign with SHA256withRSA
+        val signature = Signature.getInstance("SHA256withRSA")
+        signature.initSign(privateKey)
+        signature.update(unsignedToken.toByteArray(Charsets.UTF_8))
+        val signatureBytes = signature.sign()
+        val encodedSignature = encoder.encodeToString(signatureBytes)
+
+        return "$unsignedToken.$encodedSignature"
     }
 
     fun requestToken() {
@@ -69,33 +96,110 @@ class Client(val serviceAccount: HashMap<String, String> =  hashMapOf()) {
                 "https://www.googleapis.com/auth/spreadsheets.readonly"
             )
         )
-        val formBody = FormBody.Builder()
-            .add("grant_type", "urn:ieft:params:oauth:grant-type:jwt-bearer")
-            .add("assertion", jwt)
-            .build()
+        val requestBody = "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=$jwt"
+            .toRequestBody(applicationFormType)
 
         val request = Request.Builder()
-            .url(Endpoints.token)
-            .post(formBody)
+            .url(serviceAccount["token_uri"]!!)
+            .post(requestBody)
             .header("Content-Type", "application/x-www-form-urlencoded")
             .build()
 
         client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw Exception("Unexpected code $response")
-            }
+            if (!response.isSuccessful) error("Token request failed: ${response.code} - ${response.body?.string()}")
 
-            val body = response.body?.string()
-            accessToken = body // this will contain access_token, expires_in, etc.
+            val body = response.body?.string() ?: error("Empty response")
+            val json = Gson().fromJson(body, Map::class.java)
+            accessToken = json["access_token"] as String
+            expiresIn =  json["expires_in"] as Double
         }
 
-    }
-
-    fun getSpreadSheets() {
 
     }
 
-    fun readSpreadSheet(gSheetId: String, sheetName: String) {}
+    fun setSpreadSheets() {
+        val request = Request.Builder()
+            .url(Endpoints.drive)
+            .get()
+            .header("Authorization", "Bearer $accessToken")
+            .build()
+        val spreadSheets: HashMap<String, String> = HashMap()
+        val result = ArrayList<GSpreadSheet>()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) error("Drive request failed: ${response.code} - ${response.body?.string()}")
+            val body = response.body?.string() ?: error("Empty response")
+            val json = Gson().fromJson(body, Map::class.java)
+            val files = json["files"]
+            if (files is List<*>) {
+                for (file in files) {
+                    if (file is Map<*, *>) {
+                        val mimeType = file["mimeType"]
+                        val name = file["name"]
+                        val id = file["id"]
+                        if (mimeType.toString().contains("spreadsheet"))
+                        {
+                            spreadSheets.put(id as String, name as String)
+                        }
+                    }
+                }
+            }
+        }
+
+        for (spreadSheet in spreadSheets) {
+            val id = spreadSheet.key
+            val sheetsData = ArrayList<GSheet>()
+            val request = Request.Builder()
+                .url("${Endpoints.sheetsRead}$id")
+                .get()
+                .header("Authorization", "Bearer $accessToken")
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) error("Sheets request failed: ${response.code} - ${response.body?.string()}")
+                val body = response.body?.string() ?: error("Empty response")
+                val json = Gson().fromJson(body, Map::class.java)
+                val sheets =  json["sheets"]
+                if (sheets is List<*>) {
+                    for (sheet in sheets) {
+                        if (sheet is Map<*, *>) {
+                            val properties =  sheet["properties"]
+                            if (properties is Map<*, *>) {
+                                val title = properties["title"] as String
+                                val id = (properties["sheetId"] as? Double)?.toInt()
+                                val gSheet = GSheet(title, id!!)
+                                sheetsData.add(gSheet)
+                            }
+                        }
+                    }
+                }
+            }
+            val resulSheet = GSpreadSheet(spreadSheet.value, spreadSheet.key, sheetsData)
+            result.add(resulSheet)
+        }
+        gSheets = result
+    }
+
+    fun getSpreadSheet(spreadSheetName: String): GSpreadSheet? {
+        for (spreadsheet in gSheets!!) {
+            if (spreadsheet.name.equals(spreadSheetName, ignoreCase = true)) {
+                return  spreadsheet
+            }
+        }
+        return null
+    }
+
+    fun readSpreadSheet(gSheetId: String, sheetName: String): ReadSheetResponse {
+        val request = Request.Builder()
+            .url("${Endpoints.sheetsRead}$gSheetId/values/$sheetName")
+            .get()
+            .header("Authorization", "Bearer $accessToken")
+            .build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) error("Read sheet request failed: ${response.code} - ${response.body?.string()}")
+            val body = response.body?.string() ?: error("Empty response")
+            val json = Gson().fromJson(body, ReadSheetResponse::class.java)
+            return json
+        }
+    }
 
     fun appendToSheet(gSheetId: String, sheetRange: String, rows: List<String>) {
 
