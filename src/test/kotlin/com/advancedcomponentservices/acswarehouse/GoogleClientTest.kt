@@ -41,4 +41,15 @@ class GoogleClientTest {
         println(sheetResponse)
     }
 
+    @Test
+    fun `test Bulk Sheet Read` ()
+    {
+        val gc = GoogleClient(serviceAccount)
+        val spreadSheet = gc.getSpreadSheet("Commercial Order Process V2")!!
+        val sheetsList = setOf("Open Order Status Report", "SKU Cross Index", "Items")
+        val response = gc.readSpreadSheets(spreadSheet.id, sheetsList)
+        println(response)
+    }
+
+
 }

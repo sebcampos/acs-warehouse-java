@@ -1,8 +1,9 @@
 package com.advancedcomponentservices.acswarehouse.google
 
+import com.advancedcomponentservices.acswarehouse.google.models.BulkSheetRange
 import com.advancedcomponentservices.acswarehouse.google.models.GSheet
 import com.advancedcomponentservices.acswarehouse.google.models.GSpreadSheet
-import com.advancedcomponentservices.acswarehouse.google.models.ReadSheetResponse
+import com.advancedcomponentservices.acswarehouse.google.models.SheetRange
 import com.google.gson.Gson
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -119,7 +120,7 @@ class Client(val serviceAccount: HashMap<String, String> =  hashMapOf()) {
 
     fun setSpreadSheets() {
         val request = Request.Builder()
-            .url(Endpoints.drive)
+            .url(Endpoints.DRIVE)
             .get()
             .header("Authorization", "Bearer $accessToken")
             .build()
@@ -149,7 +150,7 @@ class Client(val serviceAccount: HashMap<String, String> =  hashMapOf()) {
             val id = spreadSheet.key
             val sheetsData = ArrayList<GSheet>()
             val request = Request.Builder()
-                .url("${Endpoints.sheetsRead}$id")
+                .url("${Endpoints.SHEETS_READ}$id")
                 .get()
                 .header("Authorization", "Bearer $accessToken")
                 .build()
@@ -187,16 +188,33 @@ class Client(val serviceAccount: HashMap<String, String> =  hashMapOf()) {
         return null
     }
 
-    fun readSpreadSheet(gSheetId: String, sheetName: String): ReadSheetResponse {
+    fun readSpreadSheet(gSheetId: String, sheetName: String): SheetRange {
         val request = Request.Builder()
-            .url("${Endpoints.sheetsRead}$gSheetId/values/$sheetName")
+            .url("${Endpoints.SHEETS_READ}$gSheetId/values/$sheetName")
             .get()
             .header("Authorization", "Bearer $accessToken")
             .build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) error("Read sheet request failed: ${response.code} - ${response.body?.string()}")
             val body = response.body?.string() ?: error("Empty response")
-            val json = Gson().fromJson(body, ReadSheetResponse::class.java)
+            val json = Gson().fromJson(body, SheetRange::class.java)
+            return json
+        }
+    }
+
+    fun readSpreadSheets(gSheetId: String, sheetNames: Set<String>): BulkSheetRange
+    {
+        val url = Endpoints.BATCH_SHEETS_READ.replace("{spreadsheetId}", gSheetId)
+        val ranges = sheetNames.joinToString(separator = "&ranges=", prefix = "ranges=")
+        val request = Request.Builder()
+            .url("$url?$ranges")
+            .get()
+            .header("Authorization", "Bearer $accessToken")
+            .build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) error("Read Batch Sheet request failed: ${response.code} - ${response.body?.string()}")
+            val body = response.body?.string() ?: error("Empty response")
+            val json = Gson().fromJson(body, BulkSheetRange::class.java)
             return json
         }
     }
