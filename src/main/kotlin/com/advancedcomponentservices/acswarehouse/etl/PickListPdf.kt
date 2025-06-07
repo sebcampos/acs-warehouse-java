@@ -7,14 +7,20 @@ import com.lowagie.text.Phrase
 import com.lowagie.text.PageSize
 import com.lowagie.text.Paragraph
 import com.lowagie.text.Rectangle
+import com.lowagie.text.pdf.BaseFont
+import com.lowagie.text.pdf.ColumnText
+import com.lowagie.text.pdf.PdfContentByte
 import com.lowagie.text.pdf.PdfCopy
 import com.lowagie.text.pdf.PdfPCell
 import com.lowagie.text.pdf.PdfPTable
+import com.lowagie.text.pdf.PdfPageEventHelper
 import com.lowagie.text.pdf.PdfReader
+import com.lowagie.text.pdf.PdfTemplate
 import com.lowagie.text.pdf.PdfWriter
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.FileOutputStream
+import java.time.format.DateTimeFormatter
 
 fun generatePickList(outPathDir: String, orders: List<Order>) {
     val maxOrderNum = orders.maxOf { it.num }
@@ -46,41 +52,94 @@ private fun processOrder(orderNumber: String, orders: List<Order>): ByteArrayOut
     val document = Document(PageSize.LETTER, 10f, 10f, 15f, 15f)
     val outputStream = ByteArrayOutputStream()
     val writer = PdfWriter.getInstance(document, outputStream)
+    writer.pageEvent = PageNumberEvent(orderNumber)
     document.open()
 
     val boldFont = Font(Font.HELVETICA, 12f, Font.BOLD)
     val normalFont = Font(Font.HELVETICA, 10f, Font.NORMAL)
 
 
-    document.add(Paragraph("Packing Slip $orderNumber").apply {
+    document.add(Paragraph("Packing Slip $orderNumber", boldFont).apply {
         alignment = Element.ALIGN_CENTER
         spacingAfter = 10f
     })
 
     val row = orders.first()
+    val name = row.name
+    val po = row.po
+    var shipToAddress = row.shipToAddress
+    val shipToAddress2 = row.shipToAddress2
+    val orderNum = row.num
+    val date = row.date.format(DateTimeFormatter.ofPattern("MM/dd/yyyy"))
+    val shipDate = row.shipDate?.format(DateTimeFormatter.ofPattern("MM/dd/yyyy")) ?: "-"
 
-    // header
-    document.add(Paragraph("${row.name} PO ${row.po}", normalFont))
-    document.add(Paragraph("Ship To: ", normalFont))
-    document.add(Paragraph(row.shipToAddress, normalFont))
-    row.shipToAddress2?.let {
-        document.add(Paragraph(it, normalFont))
+    if (!shipToAddress2.isNullOrBlank()) {
+        shipToAddress = "$shipToAddress\n$shipToAddress2"
     }
-    document.add(Paragraph("${row.shipToCity}, ${row.shipToState} ${row.shipToZip}", normalFont))
 
+    // Create a parent table with 2 columns: Ship To | Order Info
+    val outerTable = PdfPTable(2)
+    outerTable.widthPercentage = 100f
+    outerTable.setWidths(floatArrayOf(1.5f, 1f)) // Adjust width ratio as needed
 
-    // order info in the top right
-    val orderInfo = PdfPTable(2)
-    orderInfo.horizontalAlignment = Element.ALIGN_RIGHT
-    orderInfo.addCell(Phrase("Order #", normalFont))
-    orderInfo.addCell(Phrase(row.num.toString(), boldFont))
-    orderInfo.addCell(Phrase("Date", normalFont))
-    orderInfo.addCell(Phrase(row.date.toString(), normalFont))
-    orderInfo.addCell(Phrase("User", normalFont))
-    orderInfo.addCell(Phrase("-", normalFont))
-    orderInfo.addCell(Phrase("Ship Date", normalFont))
-    orderInfo.addCell(Phrase(row.shipDate.toString(), normalFont))
-    document.add(orderInfo)
+    // ------------------------
+    // LEFT: Ship To Table
+    // ------------------------
+    val shipToTable = PdfPTable(1)
+    shipToTable.defaultCell.border = Rectangle.NO_BORDER
+
+    shipToTable.addCell(Phrase("$name PO $po", normalFont))
+
+    val shipToInnerTable = PdfPTable(2)
+    shipToInnerTable.setWidths(floatArrayOf(1f, 3f))
+    shipToInnerTable.widthPercentage = 100f
+
+    // Add "Ship To:" and address cells
+    val labelCell = PdfPCell(Phrase("Ship To:", normalFont))
+    labelCell.border = Rectangle.NO_BORDER
+
+    val addressCell = PdfPCell(Phrase(shipToAddress, normalFont))
+    addressCell.border = Rectangle.NO_BORDER
+
+    shipToInnerTable.addCell(labelCell)
+    shipToInnerTable.addCell(addressCell)
+
+    // Put the inner table into a cell of the outer table
+    val nestedCell = PdfPCell(shipToInnerTable)
+    nestedCell.border = Rectangle.NO_BORDER
+    shipToTable.addCell(nestedCell)
+
+    val leftCell = PdfPCell(shipToTable)
+    leftCell.border = Rectangle.NO_BORDER
+    outerTable.addCell(leftCell)
+
+    // ------------------------
+    // RIGHT: Order Info Table
+    // ------------------------
+    val orderInfoTable = PdfPTable(2)
+    orderInfoTable.defaultCell.border = Rectangle.NO_BORDER
+    orderInfoTable.setWidths(floatArrayOf(1f, 1.5f))
+    orderInfoTable.widthPercentage = 100f
+
+    fun orderRow(label: String, value: String, isBold: Boolean = false) {
+        orderInfoTable.addCell(Phrase(label, normalFont))
+        orderInfoTable.addCell(Phrase(value, if (isBold) boldFont else normalFont))
+    }
+
+    orderRow("Order #", orderNum.toString(), true)
+    orderRow("Date", date)
+    orderRow("User", "-")
+    orderRow("Ship Date", shipDate)
+
+    val rightCell = PdfPCell(orderInfoTable)
+    rightCell.border = Rectangle.NO_BORDER
+    outerTable.addCell(rightCell)
+
+    // ------------------------
+    // Add to Document
+    // ------------------------
+    document.add(outerTable)
+    document.add(Paragraph(" ")) // Spacer after the block
 
 
 
@@ -128,3 +187,35 @@ private fun processOrder(orderNumber: String, orders: List<Order>): ByteArrayOut
 
 }
 
+private class PageNumberEvent(val orderNum: String) : PdfPageEventHelper() {
+    private lateinit var totalTemplate: PdfTemplate
+    private lateinit var baseFont: BaseFont
+
+    override fun onOpenDocument(writer: PdfWriter, document: Document) {
+        totalTemplate = writer.directContent.createTemplate(30f, 16f)
+        baseFont = BaseFont.createFont(BaseFont.HELVETICA, BaseFont.WINANSI, BaseFont.NOT_EMBEDDED)
+    }
+
+    override fun onEndPage(writer: PdfWriter, document: Document) {
+        val cb = writer.directContent
+        val pageNumber = "$orderNum Page ${writer.pageNumber} of "
+
+        val x = (document.pageSize.right + document.pageSize.left) / 2
+        val y = document.pageSize.bottom + 15f
+
+        cb.beginText()
+        cb.setFontAndSize(baseFont, 9f)
+        cb.showTextAligned(PdfContentByte.ALIGN_CENTER, pageNumber, x, y, 0f)
+        cb.endText()
+
+        // Add the template (the "Y" part)
+        cb.addTemplate(totalTemplate, x + 30f, y)
+    }
+
+    override fun onCloseDocument(writer: PdfWriter, document: Document) {
+        totalTemplate.beginText()
+        totalTemplate.setFontAndSize(baseFont, 9f)
+        totalTemplate.showText("${writer.pageNumber - 1}")
+        totalTemplate.endText()
+    }
+}
