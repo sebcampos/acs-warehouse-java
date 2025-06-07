@@ -17,4 +17,9 @@ class ManagerTest {
         println(sendToWarehouse)
     }
 
+    @Test
+    fun `test Create Picklist`(){
+        manager.createPickList()
+    }
+
 }

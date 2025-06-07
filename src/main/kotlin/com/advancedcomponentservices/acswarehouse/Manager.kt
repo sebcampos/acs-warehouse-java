@@ -4,9 +4,13 @@ import com.advancedcomponentservices.acswarehouse.db.connectToDatabase
 import com.advancedcomponentservices.acswarehouse.db.insertOrUpdateBPItems
 import com.advancedcomponentservices.acswarehouse.db.insertOrUpdateItems
 import com.advancedcomponentservices.acswarehouse.db.insertOrUpdateOrdersInQueue
+import com.advancedcomponentservices.acswarehouse.db.insertOrUpdateShippingStationEntries
 import com.advancedcomponentservices.acswarehouse.db.insertOrUpdateSkuCrossItems
 import com.advancedcomponentservices.acswarehouse.db.models.Order
+import com.advancedcomponentservices.acswarehouse.db.models.ShippingStationEntry
 import com.advancedcomponentservices.acswarehouse.etl.buildQueue
+import com.advancedcomponentservices.acswarehouse.etl.buildShippingStationList
+import com.advancedcomponentservices.acswarehouse.etl.generatePickList
 import com.advancedcomponentservices.acswarehouse.etl.parseBPItems
 import com.advancedcomponentservices.acswarehouse.etl.parseItems
 import com.advancedcomponentservices.acswarehouse.etl.parseOpenOrderStatus
@@ -18,8 +22,6 @@ import io.github.cdimascio.dotenv.dotenv
 import java.lang.reflect.Type
 import java.sql.Connection
 import java.time.LocalDate
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import java.util.Base64
 import kotlin.text.startsWith
 
@@ -60,6 +62,46 @@ class Manager {
         insertOrUpdateItems(items, connection)
         insertOrUpdateBPItems(bpItems, connection)
     }
+
+
+    fun getTodaysShippingStationEntries(connection: Connection): List<ShippingStationEntry> {
+        val results = mutableListOf<ShippingStationEntry>()
+        val query = "SELECT * FROM shippingStationLog WHERE dueDate = '${LocalDate.now()}'"
+        val statement = connection.createStatement()
+        val resultSet = statement.executeQuery(query)
+        while (resultSet.next()) {
+            results.add(
+                ShippingStationEntry(
+                    lineItemId = resultSet.getString("lineItemId"),
+                    date = LocalDate.parse(resultSet.getString("date")),
+                    dueDate = LocalDate.parse(resultSet.getString("dueDate")),
+                    orderCt = resultSet.getString("orderCt"),
+                    po = resultSet.getString("po"),
+                    terms = resultSet.getString("terms"),
+                    customerName = resultSet.getString("customerName"),
+                    customerZip = resultSet.getString("customerZip"),
+                    customerEmail = resultSet.getString("customerEmail"),
+                    customerPhone = resultSet.getString("customerPhone"),
+                    customerNote = resultSet.getString("customerNote"),
+                    via = resultSet.getString("via"),
+                    shipAccount =  resultSet.getString("shipAccount"),
+                    orderedQuantity =  resultSet.getInt("orderedQuantity"),
+                    shipQuantity = resultSet.getInt("shipQuantity"),
+                    item = resultSet.getString("item"),
+                    itemDescription = resultSet.getString("itemDescription"),
+                    shipToCity =  resultSet.getString("shipToCity"),
+                    shipToAddress = resultSet.getString("shipToAddress"),
+                    shipToAddress2 =   resultSet.getString("shipToAddress2"),
+                    shipToState =  resultSet.getString("shipToState"),
+                    shipToZip = resultSet.getString("shipToZip"),
+                    remainingStock =  resultSet.getInt("remainingStock"),
+                    toBuyerNote =   resultSet.getString("toBuyerNote"),
+                )
+            )
+        }
+        return results
+    }
+
 
     fun getSendToWarehouse(): List<Order> {
         val orders = mutableListOf<Order>()
@@ -136,4 +178,30 @@ class Manager {
         return orders
     }
 
+    fun createPickList() {
+        val dotenv = dotenv()
+        val outputPath = dotenv["OUTPUT_PATH"] ?: error("OUTPUT_PATH not found")
+        val sendToWarehouse = getSendToWarehouse()
+        if (!sendToWarehouse.isEmpty())
+        {
+            // create the pdfs
+            generatePickList(outputPath, sendToWarehouse)
+
+
+            // creating shipping station entries and add to database
+            val shippingStationList = buildShippingStationList(sendToWarehouse)
+            insertOrUpdateShippingStationEntries(shippingStationList, connection)
+
+            // mark all as invoiced then update in database
+            sendToWarehouse.forEach { it.invoiced = true }
+            insertOrUpdateOrdersInQueue(sendToWarehouse, connection)
+        }
+        val todaysEntries = getTodaysShippingStationEntries(connection)
+        println(todaysEntries)
+
+        // TODO create log df by merging shipping station list with sent to warehouse
+        //    then upload to google sheet
+
+
+    }
 }

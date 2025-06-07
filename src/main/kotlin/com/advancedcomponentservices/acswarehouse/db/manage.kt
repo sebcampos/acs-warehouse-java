@@ -4,6 +4,7 @@ import com.advancedcomponentservices.acswarehouse.db.models.AppState
 import com.advancedcomponentservices.acswarehouse.db.models.BPItem
 import com.advancedcomponentservices.acswarehouse.db.models.Item
 import com.advancedcomponentservices.acswarehouse.db.models.Order
+import com.advancedcomponentservices.acswarehouse.db.models.ShippingStationEntry
 import com.advancedcomponentservices.acswarehouse.db.models.SkuCrossIndex
 import java.io.File
 import java.sql.DriverManager
@@ -30,6 +31,7 @@ fun connectToDatabase(): Connection? {
             createSkuCrossIndexIfNotExists(conn)
             createItemsIfNotExists(conn)
             createBPItemsIfNotExists(conn)
+            createShippingStationLogIfNotExists(conn)
         }
     } catch (e: Exception) {
         println("Connection failed: ${e.message}")
@@ -59,7 +61,7 @@ fun createOrdersIfNotExists(connection: Connection) {
             backOrdered INTEGER NOT NULL,
             shipToCity TEXT NOT NULL,
             shipToAddress TEXT NOT NULL,
-            shipToAddress2 TEXT NOT NULL,
+            shipToAddress2 TEXT,
             shipToState TEXT NOT NULL,
             shipToZip TEXT NOT NULL,
             binLocation TEXT,
@@ -102,6 +104,46 @@ fun createSkuCrossIndexIfNotExists(connection: Connection) {
             amzOcsPartsSku TEXT PRIMARY KEY,
             qbSku TEXT,
             packSize INTEGER
+        );
+    """.trimIndent()
+    val stmt = connection.prepareStatement(sql)
+    try {
+        stmt.execute()
+    } catch (e: Exception) {
+        e.printStackTrace()
+    } finally {
+        stmt.close()
+    }
+}
+
+
+fun createShippingStationLogIfNotExists(connection: Connection) {
+    val sql = """
+        CREATE TABLE IF NOT EXISTS shippingStationLog (
+            lineItemId TEXT PRIMARY KEY,
+            date TEXT NOT NULL,
+            dueDate TEXT NOT NULL,
+            orderCt TEXT NOT NULL,
+            po TEXT NOT NULL,
+            terms TEXT NOT NULL,
+            customerName TEXT NOT NULL,
+            customerZip TEXT NOT NULL,
+            customerEmail TEXT NOT NULL,
+            customerPhone TEXT NOT NULL,
+            customerNote TEXT NOT NULL,
+            via TEXT NOT NULL,
+            shipAccount TEXT NOT NULL,
+            orderedQuantity INTEGER NOT NULL,
+            shipQuantity INTEGER NOT NULL,
+            item TEXT NOT NULL,
+            itemDescription TEXT NOT NULL,
+            shipToCity TEXT NOT NULL,
+            shipToAddress TEXT NOT NULL,
+            shipToAddress2 TEXT,
+            shipToState TEXT NOT NULL,
+            shipToZip TEXT NOT NULL,
+            remainingStock INTEGER,
+            toBuyerNote TEXT
         );
     """.trimIndent()
     val stmt = connection.prepareStatement(sql)
@@ -434,5 +476,73 @@ fun insertOrUpdateBPItems(bpItems: List<BPItem>, connection: Connection) {
     }
 }
 
+fun insertOrUpdateShippingStationEntries(entries: List<ShippingStationEntry>, connection: Connection) {
+    val sql = """
+        INSERT INTO shippingStationLog (
+            lineItemId, date, dueDate, orderCt, po, terms, customerName, 
+            customerZip, customerEmail, customerPhone, customerNote, via, 
+            shipAccount, orderedQuantity, shipQuantity, item, itemDescription, 
+            shipToCity, shipToAddress, shipToAddress2, shipToState, shipToZip, 
+            remainingStock, toBuyerNote
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(lineItemId) DO UPDATE SET
+            date=excluded.date,
+            dueDate=excluded.dueDate,
+            orderCt=excluded.orderCt,
+            po=excluded.po,
+            terms=excluded.terms,
+            customerName=excluded.customerName,
+            customerZip=excluded.customerZip,
+            customerEmail=excluded.customerEmail,
+            customerPhone=excluded.customerPhone,
+            customerNote=excluded.customerNote,
+            via=excluded.via,
+            shipAccount=excluded.shipAccount,
+            orderedQuantity=excluded.orderedQuantity,
+            shipQuantity=excluded.shipQuantity,
+            item=excluded.item,
+            itemDescription=excluded.itemDescription,
+            shipToCity=excluded.shipToCity,
+            shipToAddress=excluded.shipToAddress,
+            shipToAddress2=excluded.shipToAddress2,
+            shipToState=excluded.shipToState,
+            shipToZip=excluded.shipToZip,
+            remainingStock=excluded.remainingStock,
+            toBuyerNote=excluded.toBuyerNote
+    """.trimIndent()
+    val stmt = connection.prepareStatement(sql)
+    try {
+        for (entry in entries) {
+            var i = 1
+            fun set(value: Any?) {
+                when (value) {
+                    null -> stmt.setObject(i++, null)
+                    is String -> stmt.setString(i++, value)
+                    is Int -> stmt.setInt(i++, value)
+                    is Boolean -> stmt.setInt(i++, if (value) 1 else 0)
+                    is LocalDate -> stmt.setString(i++, value.toString())
+                    else -> stmt.setObject(i++, value)
+                }
+            }
+
+            with(entry) {
+                listOf(
+                    lineItemId, date, dueDate, orderCt, po, terms, customerName,
+                    customerZip, customerEmail, customerPhone, customerNote, via,
+                    shipAccount, orderedQuantity, shipQuantity, item, itemDescription,
+                    shipToCity, shipToAddress, shipToAddress2, shipToState, shipToZip,
+                    remainingStock, toBuyerNote,
+                ).forEach { set(it) }
+            }
+
+            stmt.executeUpdate()
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    } finally {
+        stmt.close()
+    }
+}
 
 // TODO delete partials like in old app when generating the new queue

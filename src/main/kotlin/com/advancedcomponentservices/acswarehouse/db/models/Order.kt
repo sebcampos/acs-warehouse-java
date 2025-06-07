@@ -23,7 +23,7 @@ data class Order(
     val backOrdered: Int,
     val shipToCity: String,
     val shipToAddress: String,
-    val shipToAddress2: String,
+    val shipToAddress2: String?,
     val shipToState: String,
     val shipToZip: String,
     val binLocation: String?,
@@ -44,7 +44,7 @@ data class Order(
     val baseSku: String?,
     val packQty: Int,
     val requiredQty: Int,
-    val invoiced: Boolean,
+    var invoiced: Boolean,
     val isKit: Boolean,
     val shippedQty: Int,
     val bulkBinLocation: String?

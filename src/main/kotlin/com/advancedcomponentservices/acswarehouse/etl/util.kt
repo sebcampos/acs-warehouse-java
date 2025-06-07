@@ -3,6 +3,7 @@ package com.advancedcomponentservices.acswarehouse.etl
 import com.advancedcomponentservices.acswarehouse.db.models.BPItem
 import com.advancedcomponentservices.acswarehouse.db.models.Item
 import com.advancedcomponentservices.acswarehouse.db.models.Order
+import com.advancedcomponentservices.acswarehouse.db.models.ShippingStationEntry
 import com.advancedcomponentservices.acswarehouse.db.models.SkuCrossIndex
 import com.advancedcomponentservices.acswarehouse.etl.models.OpenOrderStatusReportOrder
 import java.math.BigDecimal
@@ -188,4 +189,36 @@ fun buildQueue(
 
 
     return orders
+}
+
+
+fun buildShippingStationList(orders: List<Order>): List<ShippingStationEntry> {
+    val today: LocalDate = LocalDate.now()
+    return orders.map {
+        ShippingStationEntry(
+            lineItemId =  it.lineItemId,
+            date = today,
+            dueDate = today,
+            orderCt = it.orderCt,
+            po = it.po,
+            terms = it.terms,
+            customerName = it.name,
+            customerZip = it.nameZip,
+            customerEmail = it.nameEmail,
+            customerPhone = it.namePhone,
+            customerNote = "ShipAcct ${it.upsAccount} ShipZip ${it.shipToZip}",
+            via = it.via,
+            shipAccount = it.upsAccount,
+            orderedQuantity = it.backOrdered,
+            shipQuantity = it.backOrdered,
+            item = it.item,
+            itemDescription = it.itemDescription,
+            shipToCity = it.shipToCity,
+            shipToAddress = it.shipToAddress,
+            shipToAddress2 = it.shipToAddress2,
+            shipToState = it.shipToState,
+            shipToZip = it.shipToZip,
+            toBuyerNote = "PO ${it.po}"
+        )
+    }
 }
