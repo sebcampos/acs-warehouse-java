@@ -17,9 +17,7 @@ import java.security.interfaces.RSAPrivateKey
 import java.security.spec.PKCS8EncodedKeySpec
 import java.time.Instant
 import java.util.Base64
-
-
-
+import java.util.concurrent.TimeUnit
 
 
 class Client(val serviceAccount: HashMap<String, String> =  hashMapOf()) {
@@ -29,6 +27,9 @@ class Client(val serviceAccount: HashMap<String, String> =  hashMapOf()) {
     val applicationFormType = "application/x-www-form-urlencoded".toMediaType()
     val client: OkHttpClient = OkHttpClient.Builder()
 //        .addInterceptor(/* custom logic */)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
     init {

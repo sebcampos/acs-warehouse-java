@@ -1,6 +1,7 @@
 package com.advancedcomponentservices.acswarehouse
 
 import com.advancedcomponentservices.acswarehouse.db.connectToDatabase
+import com.advancedcomponentservices.acswarehouse.db.deleteRelatedPartialsFromQueue
 import com.advancedcomponentservices.acswarehouse.db.insertOrUpdateBPItems
 import com.advancedcomponentservices.acswarehouse.db.insertOrUpdateItems
 import com.advancedcomponentservices.acswarehouse.db.insertOrUpdateOrdersInQueue
@@ -57,6 +58,7 @@ class Manager {
         val bpItems = parseBPItems(bpItemSheet.values)
 
         val queueOrders = buildQueue(openOrders, items, skuIndex, bpItems)
+        deleteRelatedPartialsFromQueue(queueOrders, connection)
         insertOrUpdateOrdersInQueue(queueOrders, connection)
         insertOrUpdateSkuCrossItems(skuIndex, connection)
         insertOrUpdateItems(items, connection)

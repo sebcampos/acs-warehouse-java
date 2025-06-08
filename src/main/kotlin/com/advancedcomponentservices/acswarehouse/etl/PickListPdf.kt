@@ -209,7 +209,7 @@ private class PageNumberEvent(val orderNum: String) : PdfPageEventHelper() {
         cb.endText()
 
         // Add the template (the "Y" part)
-        cb.addTemplate(totalTemplate, x + 30f, y)
+        cb.addTemplate(totalTemplate, x + 40f, y)
     }
 
     override fun onCloseDocument(writer: PdfWriter, document: Document) {

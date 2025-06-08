@@ -545,4 +545,30 @@ fun insertOrUpdateShippingStationEntries(entries: List<ShippingStationEntry>, co
     }
 }
 
-// TODO delete partials like in old app when generating the new queue
+
+fun deleteRelatedPartialsFromQueue(orders: List<Order>, connection: Connection) {
+    val sql = """
+        DELETE FROM orders
+        WHERE num = ?
+            AND item = ?
+            AND partial = 1
+            AND backOrdered != ?
+    """.trimIndent()
+    val stmt = connection.prepareStatement(sql)
+    try {
+        var totalDeleted = 0
+        for (order in orders) {
+            stmt.setInt(1, order.num)
+            stmt.setString(2, order.item)
+            stmt.setInt(3, order.backOrdered)
+            val rows = stmt.executeUpdate()
+            totalDeleted += rows
+        }
+        println("$totalDeleted rows deleted")
+
+    } catch (e: Exception) {
+        e.printStackTrace()
+    } finally {
+        stmt.close()
+}
+}
